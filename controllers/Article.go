@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"bytes"
+	"encoding/gob"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/orm"
+	"github.com/gomodule/redigo/redis"
 	"math"
 	"path"
 	"shanghaiyiqi/models"
@@ -50,7 +53,25 @@ func (this*ArticleController)ShowArticleList(){
 	PageCount := math.Ceil(float64(Count) / float64(PageSize))
 	//获取数据库文章类型列表
 	var ArticleTypes []models.ArticleType
-	o.QueryTable("ArticleType").All(&ArticleTypes)
+	//需要把文章类型的数据存储到redis中,redis通常存储的就是经常访问但又不改动的数据，在这个页面中，文章类型就属于这个数据
+	//序列化和反序列化
+	conn,err:=redis.Dial("tcp","172.16.107.175:6379")
+	if err !=nil{
+		beego.Info("redis数据库连接失败")
+	}
+	defer conn.Close()
+	res,err:=conn.Do("get","ArticleTypes")
+	if err !=nil{
+		o.QueryTable("ArticleType").All(&ArticleTypes)
+		var buffer bytes.Buffer
+		enc:=gob.NewEncoder(&buffer) //编码器
+		enc.Encode(ArticleTypes) //编码
+		conn.Do("set","ArticleTypes",buffer.Bytes())
+	}else{
+		data,_:=redis.Bytes(res,err)
+		dec:=gob.NewDecoder(bytes.NewReader(data))
+		dec.Decode(&ArticleTypes)
+	}
 	//获取前端文章类型
 	if TypeName == ""{
 		qs.Limit(PageSize,start).RelatedSel("ArticleType").All(&Articles)
